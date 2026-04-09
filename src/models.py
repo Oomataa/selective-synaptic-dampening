@@ -7,12 +7,16 @@ from torch import nn
 import numpy as np
 import torch
 from torchvision.models import resnet18
-from transformers import ViTModel, ViTFeatureExtractor
+from transformers import ViTModel
 from resnet import ResNet, BasicBlock
 
 
 def ResNet18(num_classes):
-    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes, norm_affine=True)
+
+
+def ResNet18_FN(num_classes):
+    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes, norm_affine=False)
 
 
 class Identity(nn.Module):
@@ -81,8 +85,6 @@ class Conv(nn.Sequential):
             padding = (kernel_size - 1) // 2
         model = []
         if not transpose:
-            #             model += [ConvStandard(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding
-            #                                 )]
             model += [
                 nn.Conv2d(
                     in_channels,
@@ -144,7 +146,7 @@ class AllCNN(nn.Module):
                 stride=2,
                 padding=1,
                 batch_norm=batch_norm,
-            ),  # 14
+            ),
             nn.Dropout(inplace=True) if dropout else Identity(),
             Conv(n_filter2, n_filter2, kernel_size=3, stride=1, batch_norm=batch_norm),
             Conv(n_filter2, n_filter2, kernel_size=1, stride=1, batch_norm=batch_norm),

@@ -7,6 +7,7 @@ Methods are executed in the strategies file.
 
 import random
 import os
+from collections import defaultdict
 import wandb
 
 # import optuna
@@ -19,7 +20,7 @@ from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, ConcatDataset, dataset
+from torch.utils.data import DataLoader, ConcatDataset, Subset, dataset
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
@@ -88,6 +89,28 @@ parser.add_argument(
     "-epochs", type=int, default=1, help="number of epochs of unlearning method to use"
 )
 parser.add_argument("-seed", type=int, default=0, help="seed for runs")
+parser.add_argument("-data_root", type=str, default=None, help="optional dataset root override")
+parser.add_argument("-dampening_constant", type=float, default=1.0, help="SSD lambda hyperparameter")
+parser.add_argument("-selection_weighting", type=float, default=None, help="SSD alpha hyperparameter override")
+parser.add_argument(
+    "-validation_mode",
+    type=str,
+    default="test",
+    choices=["test", "split"],
+    help="use the dataset test split directly, or carve out a validation split from the training split",
+)
+parser.add_argument(
+    "-validation_split_ratio",
+    type=float,
+    default=0.1,
+    help="fraction of the training split to reserve as validation when validation_mode=split",
+)
+parser.add_argument(
+    "-split_seed",
+    type=int,
+    default=None,
+    help="random seed for reproducible train/validation splitting; defaults to -seed",
+)
 args = parser.parse_args()
 
 # Set seeds
@@ -107,6 +130,43 @@ forget_class = conf.class_dict[args.forget_class]
 batch_size = args.b
 
 
+def _dataset_labels(ds):
+    if hasattr(ds, "targets"):
+        return list(ds.targets)
+    if hasattr(ds, "samples"):
+        return [label for _, label in ds.samples]
+    raise AttributeError(
+        f"Dataset {type(ds).__name__} does not expose labels via 'targets' or 'samples'."
+    )
+
+
+def _stratified_split(ds, val_ratio, split_seed):
+    if not 0 < val_ratio < 1:
+        raise ValueError("validation_split_ratio must be between 0 and 1 when validation_mode=split")
+
+    labels = _dataset_labels(ds)
+    indices_by_label = defaultdict(list)
+    for idx, label in enumerate(labels):
+        indices_by_label[int(label)].append(idx)
+
+    rng = random.Random(split_seed)
+    train_indices, val_indices = [], []
+    for label in sorted(indices_by_label):
+        class_indices = list(indices_by_label[label])
+        rng.shuffle(class_indices)
+
+        val_count = int(round(len(class_indices) * val_ratio))
+        if len(class_indices) > 1:
+            val_count = max(1, min(len(class_indices) - 1, val_count))
+        else:
+            val_count = 0
+
+        val_indices.extend(class_indices[:val_count])
+        train_indices.extend(class_indices[val_count:])
+
+    return Subset(ds, train_indices), Subset(ds, val_indices)
+
+
 # get network
 net = getattr(models, args.net)(num_classes=args.classes)
 net.load_state_dict(torch.load(args.weight_path))
@@ -119,16 +179,31 @@ if args.gpu:
     unlearning_teacher = unlearning_teacher.cuda()
 
 # For celebritiy faces
-root = "105_classes_pins_dataset" if args.dataset == "PinsFaceRecognition" else "./data"
+root = args.data_root if args.data_root else ("105_classes_pins_dataset_split" if args.dataset == "PinsFaceRecognition" else "./data")
 
 # Scale for ViT (faster training, better performance)
 img_size = 224 if args.net == "ViT" else 32
-trainset = getattr(datasets, args.dataset)(
+full_trainset = getattr(datasets, args.dataset)(
     root=root, download=True, train=True, unlearning=True, img_size=img_size
 )
-validset = getattr(datasets, args.dataset)(
-    root=root, download=True, train=False, unlearning=True, img_size=img_size
-)
+
+if args.validation_mode == "split":
+    split_seed = args.split_seed if args.split_seed is not None else args.seed
+    trainset, validset = _stratified_split(
+        full_trainset, args.validation_split_ratio, split_seed
+    )
+    print(
+        f"Using stratified validation split from training data: train={len(trainset)}, val={len(validset)}, "
+        f"ratio={args.validation_split_ratio}, split_seed={split_seed}"
+    )
+else:
+    trainset = full_trainset
+    validset = getattr(datasets, args.dataset)(
+        root=root, download=True, train=False, unlearning=True, img_size=img_size
+    )
+    print(
+        f"Using dataset-provided held-out split for evaluation: train={len(trainset)}, valid={len(validset)}"
+    )
 
 # Set up the dataloaders and prepare the datasets
 trainloader = DataLoader(trainset, num_workers=4, batch_size=args.b, shuffle=True)
@@ -164,6 +239,12 @@ if args.net == "ViT":
 else:
     model_size_scaler = 1
 
+selection_weighting = (
+    args.selection_weighting
+    if args.selection_weighting is not None
+    else 10 * model_size_scaler
+)
+
 kwargs = {
     "model": net,
     "unlearning_teacher": unlearning_teacher,
@@ -173,8 +254,8 @@ kwargs = {
     "forget_valid_dl": forget_valid_dl,
     "full_train_dl": full_train_dl,
     "valid_dl": validloader,
-    "dampening_constant": 1,
-    "selection_weighting": 10 * model_size_scaler,
+    "dampening_constant": args.dampening_constant,
+    "selection_weighting": selection_weighting,
     "forget_class": forget_class,
     "num_classes": args.classes,
     "dataset_name": args.dataset,

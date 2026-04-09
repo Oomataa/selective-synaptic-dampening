@@ -2,6 +2,7 @@
 Datasets used for the experiments (CIFAR and Celebrity Faces)
 """
 
+import os
 from typing import Any, Tuple
 from torchvision.datasets import CIFAR100, CIFAR10, ImageFolder
 import torch
@@ -34,20 +35,33 @@ transform_test = [
 ]
 
 
+def _pins_dataset_root(root: str, train: bool) -> str:
+    split_name = "train" if train else "test"
+    split_root = os.path.join(root, split_name)
+    if os.path.isdir(split_root):
+        return split_root
+    if os.path.isdir(root):
+        return root
+    raise FileNotFoundError(
+        f"PinsFaceRecognition root '{root}' was not found. Expected either a raw ImageFolder root "
+        f"or split directories at '{split_root}'."
+    )
+
+
 # www.kaggle.com/datasets/hereisburak/pins-face-recognition
 class PinsFaceRecognition(ImageFolder):
     def __init__(self, root, train, unlearning, download, img_size=32):
         if train:
             if unlearning:
-                transform = transform_unlearning
+                transform = list(transform_unlearning)
             else:
-                transform = transform_train_from_scratch
+                transform = list(transform_train_from_scratch)
         else:
-            transform = transform_test
+            transform = list(transform_test)
         transform.insert(0, transforms.Resize((36, 36)))
         transform.append(transforms.Resize((img_size, img_size)))
         transform = transforms.Compose(transform)
-        super().__init__(root, transform)
+        super().__init__(_pins_dataset_root(root, train), transform)
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         x, y = super().__getitem__(index)
@@ -58,11 +72,11 @@ class Cifar100(CIFAR100):
     def __init__(self, root, train, unlearning, download, img_size=32):
         if train:
             if unlearning:
-                transform = transform_unlearning
+                transform = list(transform_unlearning)
             else:
-                transform = transform_train_from_scratch
+                transform = list(transform_train_from_scratch)
         else:
-            transform = transform_test
+            transform = list(transform_test)
         transform.append(transforms.Resize(img_size))
         transform = transforms.Compose(transform)
 
@@ -77,11 +91,11 @@ class Cifar20(CIFAR100):
     def __init__(self, root, train, unlearning, download, img_size=32):
         if train:
             if unlearning:
-                transform = transform_unlearning
+                transform = list(transform_unlearning)
             else:
-                transform = transform_train_from_scratch
+                transform = list(transform_train_from_scratch)
         else:
-            transform = transform_test
+            transform = list(transform_test)
         transform.append(transforms.Resize(img_size))
         transform = transforms.Compose(transform)
 
@@ -132,11 +146,11 @@ class Cifar10(CIFAR10):
     def __init__(self, root, train, unlearning, download, img_size=32):
         if train:
             if unlearning:
-                transform = transform_unlearning
+                transform = list(transform_unlearning)
             else:
-                transform = transform_train_from_scratch
+                transform = list(transform_train_from_scratch)
         else:
-            transform = transform_test
+            transform = list(transform_test)
         transform.append(transforms.Resize(img_size))
         transform = transforms.Compose(transform)
 

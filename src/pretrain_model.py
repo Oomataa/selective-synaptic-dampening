@@ -95,6 +95,7 @@ parser.add_argument("-gpu", action="store_true", default=False, help="use gpu or
 parser.add_argument("-b", type=int, default=64, help="batch size for dataloader")
 parser.add_argument("-warm", type=int, default=1, help="warm up training phase")
 parser.add_argument("-lr", type=float, default=0.1, help="initial learning rate")
+parser.add_argument("-data_root", type=str, default=None, help="optional dataset root override")
 args = parser.parse_args()
 
 
@@ -114,7 +115,7 @@ if args.gpu:
     net = net.cuda()
 
 # dataloaders
-root = "105_classes_pins_dataset" if args.dataset == "PinsFaceRecognition" else "./data"
+root = args.data_root if args.data_root else ("105_classes_pins_dataset_split" if args.dataset == "PinsFaceRecognition" else "./data")
 img_size = 224 if args.net == "ViT" else 32
 
 trainset = getattr(datasets, args.dataset)(
