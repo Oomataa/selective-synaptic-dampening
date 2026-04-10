@@ -21,6 +21,10 @@ from utils import *
 import ssd as ssd
 import conf
 
+from pathlib import Path
+import hashlib
+import json
+
 
 def get_metric_scores(
     model,
@@ -308,6 +312,76 @@ def FisherForgetting(
     )
 
 
+# def ssd_tuning(
+#     model,
+#     unlearning_teacher,
+#     retain_train_dl,
+#     retain_valid_dl,
+#     forget_train_dl,
+#     forget_valid_dl,
+#     valid_dl,
+#     dampening_constant,
+#     selection_weighting,
+#     full_train_dl,
+#     device,
+#     **kwargs,
+# ):
+#     parameters = {
+#         "lower_bound": 1,
+#         "exponent": 1,
+#         "magnitude_diff": None,
+#         "min_layer": -1,
+#         "max_layer": -1,
+#         "forget_threshold": 1,
+#         "dampening_constant": dampening_constant,
+#         "selection_weighting": selection_weighting,
+#     }
+
+#     # load the trained model
+#     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+#     ssd = ssd.ParameterPerturber(model, optimizer, device, parameters)
+#     model = model.eval()
+
+#     sample_importances = ssd.calc_importance(forget_train_dl)
+
+#     original_importances = ssd.calc_importance(full_train_dl)
+#     ssd.modify_weight(original_importances, sample_importances)
+#     return get_metric_scores(
+#         model,
+#         unlearning_teacher,
+#         retain_train_dl,
+#         retain_valid_dl,
+#         forget_train_dl,
+#         forget_valid_dl,
+#         valid_dl,
+#         device,
+#     )
+
+
+
+def _stable_run_key(
+    forget_type="unknown",
+    model_name="unknown_model",
+    dataset_name="unknown_dataset",
+    model_path=None,
+    ssd_variant="ssd",
+    extra_tag=None,
+):
+    payload = {
+        "forget_type": forget_type,
+        "model_name": model_name,
+        "dataset_name": dataset_name,
+        "model_path": str(model_path) if model_path is not None else None,
+        "ssd_variant": ssd_variant,
+        "extra_tag": extra_tag,
+    }
+    raw = json.dumps(payload, sort_keys=True)
+    short_hash = hashlib.md5(raw.encode()).hexdigest()[:10]
+    return f"{dataset_name}_{model_name}_{forget_type}_{ssd_variant}_{short_hash}"
+
+
+
 def ssd_tuning(
     model,
     unlearning_teacher,
@@ -320,6 +394,14 @@ def ssd_tuning(
     selection_weighting,
     full_train_dl,
     device,
+    importance_dir=None,
+    recompute_importance=False,
+    forget_type="unknown",
+    model_name="unknown_model",
+    dataset_name="unknown_dataset",
+    model_path=None,
+    ssd_variant="ssd",
+    extra_tag=None,
     **kwargs,
 ):
     parameters = {
@@ -333,16 +415,54 @@ def ssd_tuning(
         "selection_weighting": selection_weighting,
     }
 
-    # load the trained model
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-
-    ssd = ssd.ParameterPerturber(model, optimizer, device, parameters)
+    pdr = ssd.ParameterPerturber(model, optimizer, device, parameters)
     model = model.eval()
 
-    sample_importances = ssd.calc_importance(forget_train_dl)
+    original_importances = None
+    sample_importances = None
 
-    original_importances = ssd.calc_importance(full_train_dl)
-    ssd.modify_weight(original_importances, sample_importances)
+    if importance_dir is not None:
+        base_dir = Path(importance_dir)
+        run_key = _stable_run_key(
+            forget_type=forget_type,
+            model_name=model_name,
+            dataset_name=dataset_name,
+            model_path=model_path,
+            ssd_variant=ssd_variant,
+            extra_tag=extra_tag,
+        )
+        run_dir = base_dir / run_key
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        full_path = run_dir / "full_importances.pt"
+        forget_path = run_dir / "forget_importances.pt"
+        meta_path = run_dir / "meta.json"
+
+        if (not recompute_importance) and full_path.exists() and forget_path.exists():
+            original_importances = torch.load(full_path, map_location=device)
+            sample_importances = torch.load(forget_path, map_location=device)
+        else:
+            sample_importances = pdr.calc_importance(forget_train_dl)
+            original_importances = pdr.calc_importance(full_train_dl)
+            torch.save(sample_importances, forget_path)
+            torch.save(original_importances, full_path)
+            meta = {
+                "forget_type": forget_type,
+                "model_name": model_name,
+                "dataset_name": dataset_name,
+                "model_path": str(model_path) if model_path is not None else None,
+                "ssd_variant": ssd_variant,
+                "extra_tag": extra_tag,
+                "cache_dir": str(run_dir),
+            }
+            meta_path.write_text(json.dumps(meta, indent=2))
+    else:
+        sample_importances = pdr.calc_importance(forget_train_dl)
+        original_importances = pdr.calc_importance(full_train_dl)
+
+    pdr.modify_weight(original_importances, sample_importances)
+
     return get_metric_scores(
         model,
         unlearning_teacher,
