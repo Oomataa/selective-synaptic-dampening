@@ -744,7 +744,7 @@ def ssd_tuning(
     dataset_name="unknown_dataset", # args.dataset
     model_path=None,
     ssd_variant="ssd",
-    extra_tag=None,
+    extra_tag='full_class',
     **kwargs,
 ):
     parameters = {

@@ -401,7 +401,7 @@ def ssd_tuning(
     dataset_name="unknown_dataset",
     model_path=None,
     ssd_variant="ssd",
-    extra_tag=None,
+    extra_tag='random',
     **kwargs,
 ):
     parameters = {
