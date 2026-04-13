@@ -260,7 +260,9 @@ kwargs = {
     "num_classes": args.classes,
     "dataset_name": args.dataset,
     "device": "cuda" if args.gpu else "cpu",
+    "forget_type": args.method,
     "model_name": args.net,
+    "dataset_name": args.dataset,
 }
 
 # Logging

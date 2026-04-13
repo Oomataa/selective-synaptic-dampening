@@ -737,11 +737,11 @@ def ssd_tuning(
     selection_weighting,
     full_train_dl,
     device,
-    importance_dir=None,
+    importance_dir= None, #'/home/.../', # the code directory
     recompute_importance=False,
-    forget_type="unknown",
-    model_name="unknown_model",
-    dataset_name="unknown_dataset",
+    forget_type="unknown", # args.method
+    model_name="unknown_model", # args.net
+    dataset_name="unknown_dataset", # args.dataset
     model_path=None,
     ssd_variant="ssd",
     extra_tag=None,
